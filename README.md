@@ -83,7 +83,7 @@ npm test            # MCP 클라이언트로 서버를 띄워 검증 규칙 확�
 node test/e2e.ts    # 판단 → 승인 → 초안 → 승인 → PPT 전체 흐름 확인
 ```
 
-Claude Code에서 이 폴더를 열면 `.mcp.json`으로 서버가 연결됩니다. `/proposal:create_proposal` prompt로 시작합니다.
+Claude Code에서 이 폴더를 열면 `.mcp.json`으로 서버가 연결됩니다. `/mcp__proposal__create_proposal` prompt로 시작합니다. Claude 데스크탑 앱의 Code 탭도 같습니다.
 
 환경 변수:
 - `PROPOSAL_ROOT`: 참고 폴더 위치 (기본 `samples/`)
