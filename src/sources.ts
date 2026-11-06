@@ -6,7 +6,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export type Requirement = { id: string; category: string; title: string; detail: string; priority: string };
-export type Feature = { id: string; module: string; name: string; description: string; note: string };
+export type Section = { file: string; title: string; text: string }; // 표준 기능 정의서의 ## 소제목 단위
 export type Slide = { id: string; file: string; slide: number; title: string; text: string };
 
 export const FOLDERS = { past: "past_proposals", rfp: "rfp", features: "standard_features" } as const;
@@ -55,8 +55,16 @@ export const readRfp = (path: string) =>
     priority: ["중요도", "우선순위"],
   }) as Promise<Requirement[]>;
 
-export const readFeatures = (path: string) =>
-  readSheet(path, { id: ["기능ID", "기능 ID"], module: ["모듈"], name: ["기능명"], description: ["설명"], note: ["비고"] }) as Promise<Feature[]>;
+// 표준 기능 정의서는 사람이 자연어로 쓴 Markdown. ## 소제목을 기능 단위로 본다
+export function splitSections(md: string, file: string): Section[] {
+  return md.split(/^## /m).slice(1).map((block) => {
+    const [title, ...rest] = block.split("\n");
+    return { file, title: title.trim(), text: rest.join("\n").trim() };
+  });
+}
+
+// 인용문 검사용: 공백·줄바꿈 차이는 무시한다
+export const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
 
 // pptx는 zip 안의 slideN.xml에서 <a:t> 텍스트만 뽑는다. 첫 텍스트를 제목으로 본다
 export async function readPptx(path: string, file: string): Promise<Slide[]> {
@@ -73,7 +81,7 @@ export async function readPptx(path: string, file: string): Promise<Slide[]> {
 }
 const decodeXml = (s: string) => s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
 
-// ponytail: BM25 키워드 검색만. 벡터 검색은 여기서 결과를 RRF로 합치면 된다
+// 기존 제안서 검색. ponytail: BM25 키워드 검색만, 벡터 검색은 여기서 결과를 RRF로 합치면 된다
 function index<T extends { id: string }>(docs: T[], fields: (keyof T & string)[]) {
   const ms = new MiniSearch<T>({ fields, storeFields: Object.keys(docs[0] ?? {}), tokenize, searchOptions: { tokenize, combineWith: "OR" } });
   ms.addAll(docs);
@@ -81,14 +89,10 @@ function index<T extends { id: string }>(docs: T[], fields: (keyof T & string)[]
 }
 
 export async function loadLibrary(root: string) {
-  const featureFiles = await listFiles(root, FOLDERS.features, ".xlsx");
-  if (!featureFiles.length) throw new Error(`${FOLDERS.features} 폴더에 표준 기능 정의서(.xlsx)가 없습니다`);
-  const features = (await Promise.all(featureFiles.map((f) => readFeatures(join(root, FOLDERS.features, f))))).flat();
+  const featureFiles = await listFiles(root, FOLDERS.features, ".md");
+  if (!featureFiles.length) throw new Error(`${FOLDERS.features} 폴더에 표준 기능 정의서(.md)가 없습니다`);
+  const docs = await Promise.all(featureFiles.map(async (f) => ({ file: f, markdown: await readFile(join(root, FOLDERS.features, f), "utf8") })));
+  const sections = docs.flatMap((d) => splitSections(d.markdown, d.file));
   const slides = (await Promise.all((await listFiles(root, FOLDERS.past, ".pptx")).map((f) => readPptx(join(root, FOLDERS.past, f), f)))).flat();
-  return {
-    features,
-    slides,
-    searchFeatures: index(features, ["name", "description", "module", "note"]),
-    searchSlides: index(slides, ["title", "text"]),
-  };
+  return { docs, sections, slides, searchSlides: index(slides, ["title", "text"]) };
 }

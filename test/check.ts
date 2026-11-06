@@ -20,10 +20,15 @@ const call = async (name: string, args: Record<string, unknown> = {}) => {
 assert.match((await call("load_rfp")).text, /요구사항 14건/);
 const first = JSON.parse((await call("next_requirement")).text);
 assert.equal(first.요구사항.id, "SFR-001");
-assert.ok(first.표준기능후보.some((f: { id: string }) => f.id === "F-COL-01"), "수집 요구사항에 수집 기능이 후보로 나와야 함");
+assert.match((await call("read_standard_features")).text, /## 메타데이터 수집/);
 
-assert.ok((await call("record_judgment", { requirementId: "SFR-001", decision: "standard", featureIds: ["F-XXX"], rationale: "없는 기능 ID로 판단" })).error, "없는 기능 ID 거절");
-assert.ok((await call("record_judgment", { requirementId: "SFR-001", decision: "custom", featureIds: ["F-COL-01"], rationale: "범위 없이 custom 판단" })).error, "custom은 범위 필수");
+const j = (o: Record<string, unknown>) => call("record_judgment", { requirementId: "SFR-001", rationale: "검증 규칙 확인용 판단입니다", ...o });
+assert.ok((await j({ decision: "standard", sections: ["없는 소제목"], quotes: ["x"] })).error, "없는 소제목 거절");
+assert.ok((await j({ decision: "standard", sections: ["메타데이터 수집"], quotes: [] })).error, "standard는 인용 필수");
+assert.ok((await j({ decision: "standard", sections: ["메타데이터 수집"], quotes: ["수집 실패 시 담당자에게 문자를 보냅니다"] })).error, "정의서에 없는 문장 인용 거절");
+assert.ok((await j({ decision: "standard", sections: ["통합검색"], quotes: ["정해 둔 주기(보통 매일 새벽)에 자동으로 수집합니다"] })).error, "다른 소제목의 문장 인용 거절");
+assert.ok((await j({ decision: "custom", sections: ["메타데이터 수집"], quotes: ["정해 둔 주기(보통 매일 새벽)에 자동으로 수집합니다."] })).error, "custom은 범위 필수");
+assert.ok(!(await j({ decision: "standard", sections: ["메타데이터 수집"], quotes: ["정해 둔 주기(보통   매일 새벽)에\n자동으로 수집합니다."] })).error, "공백 차이는 허용");
 assert.ok((await call("save_draft", { markdown: "# 제목\n- 승인 전에 초안을 저장하려는 시도입니다 ......" })).error, "추적표 승인 전 초안 거절");
 assert.ok((await call("render_pptx")).error, "초안 없으면 PPT 거절");
 assert.ok((await call("request_approval", { target: "traceability" })).error, "판단이 끝나기 전 승인 요청 거절");

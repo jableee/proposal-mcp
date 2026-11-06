@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ROOT, STATE, WORKSPACE } from "./config.ts";
 import { renderPptx } from "./render.ts";
-import { FOLDERS, listFiles, loadLibrary, readRfp } from "./sources.ts";
+import { FOLDERS, listFiles, loadLibrary, normalize, readRfp } from "./sources.ts";
 import { coverage, DECISION_LABEL, hash, isApproved, load, save, traceabilityMarkdown, type State, type Target } from "./state.ts";
 
 const lib = await loadLibrary(ROOT);
@@ -29,8 +29,8 @@ server.registerTool("list_sources", {
   return text(json({
     기존제안서: await listFiles(ROOT, FOLDERS.past, ".pptx"),
     RFP: await listFiles(ROOT, FOLDERS.rfp, ".xlsx"),
-    표준기능정의서: await listFiles(ROOT, FOLDERS.features, ".xlsx"),
-    표준기능수: lib.features.length,
+    표준기능정의서: await listFiles(ROOT, FOLDERS.features, ".md"),
+    표준기능소제목: lib.sections.map((x) => x.title),
     기존제안서슬라이드수: lib.slides.length,
     진행상태: s ? { rfp: s.rfpFile, 요구사항: s.requirements.length, 판단완료: Object.keys(s.judgments).length, 추적표승인: isApproved(s, "traceability"), 초안: !!s.draft, 초안승인: isApproved(s, "draft") } : "시작 전",
   }));
@@ -51,8 +51,12 @@ server.registerTool("load_rfp", {
   return text(`${f}에서 요구사항 ${requirements.length}건을 읽었습니다. next_requirement로 하나씩 판단하세요.\n` + requirements.map((r) => `- ${r.id} [${r.category}/${r.priority}] ${r.title}`).join("\n"));
 });
 
+server.registerTool("read_standard_features", {
+  description: "솔루션 표준 기능 정의서(사람이 자연어로 쓴 Markdown) 전체를 읽는다. 요구사항 판단 전에 반드시 한 번 읽고, 판단할 때 이 문서의 ## 소제목과 원문 문장을 근거로 쓴다.",
+}, async () => text(lib.docs.map((d) => `<!-- 파일: ${d.file} -->\n${d.markdown}`).join("\n\n")));
+
 server.registerTool("next_requirement", {
-  description: "아직 판단하지 않은 다음 요구사항과, 판단 근거 후보(표준 기능 정의서 검색 결과, 기존 제안서의 비슷한 슬라이드)를 준다. 후보는 키워드 검색 결과라 관련 없을 수 있으니 직접 읽고 판단한다. 다 끝나면 done=true.",
+  description: "아직 판단하지 않은 다음 요구사항과 기존 제안서의 비슷한 슬라이드(키워드 검색 결과라 관련 없을 수 있음)를 준다. 판단은 read_standard_features로 읽은 표준 기능 정의서를 기준으로 한다. 다 끝나면 done=true."
 }, async () => {
   const s = await state();
   const r = s.requirements.find((x) => !s.judgments[x.id]);
@@ -61,9 +65,9 @@ server.registerTool("next_requirement", {
   return text(json({
     남은요구사항: s.requirements.filter((x) => !s.judgments[x.id]).length,
     요구사항: r,
-    표준기능후보: lib.searchFeatures(q, 5),
     기존제안서후보: lib.searchSlides(q, 3).map(({ id, title, text, score }) => ({ id, title, text, score })),
     판단기준: {
+      기준문서: "read_standard_features로 읽은 표준 기능 정의서. 정의서에 '별도 개발', '연동 필요', '표준에 없음'처럼 적힌 제약을 반드시 반영",
       standard: "표준 기능만으로 요구사항 전체를 충족 (설정·옵션 모듈 포함)",
       custom: "표준 기능을 바탕으로 추가 개발·연동이 필요 (customScope에 추가 개발 범위를 적는다)",
       unsupported: "솔루션 범위 밖이라 이번 제안에서 제외하거나 별도 협의가 필요",
@@ -76,21 +80,25 @@ server.registerTool("record_judgment", {
   inputSchema: {
     requirementId: z.string(),
     decision: z.enum(["standard", "custom", "unsupported"]),
-    featureIds: z.array(z.string()).describe("근거가 되는 표준 기능 ID. standard·custom은 1개 이상"),
+    sections: z.array(z.string()).describe("근거가 되는 표준 기능 정의서의 ## 소제목 (그대로). standard·custom은 1개 이상"),
+    quotes: z.array(z.string()).describe("판단 근거가 된 정의서 원문 문장을 그대로 옮긴 것. 위 소제목 안에 실제로 있어야 한다. standard·custom은 1개 이상"),
     rationale: z.string().min(10).describe("요구사항 문구와 기능 설명을 비교한 판단 이유"),
     customScope: z.string().optional().describe("custom일 때 추가 개발·연동 범위"),
     evidence: z.array(z.string()).optional().describe("참고한 기존 제안서 슬라이드 id (예: 파일명#5)"),
   },
-}, async ({ requirementId, decision, featureIds, rationale, customScope, evidence }) => {
+}, async ({ requirementId, decision, sections, quotes, rationale, customScope, evidence }) => {
   const s = await state();
   if (!s.requirements.some((r) => r.id === requirementId)) return fail(`없는 요구사항 ID: ${requirementId}`);
-  const unknown = featureIds.filter((id) => !lib.features.some((f) => f.id === id));
-  if (unknown.length) return fail(`표준 기능 정의서에 없는 기능 ID: ${unknown.join(", ")}. 근거는 정의서에 있는 기능만 쓸 수 있습니다`);
-  if (decision !== "unsupported" && !featureIds.length) return fail(`${decision} 판단에는 근거 기능 ID가 1개 이상 필요합니다`);
+  const cited = lib.sections.filter((x) => sections.includes(x.title));
+  const unknown = sections.filter((t) => !cited.some((x) => x.title === t));
+  if (unknown.length) return fail(`표준 기능 정의서에 없는 소제목: ${unknown.join(", ")}. 있는 소제목: ${lib.sections.map((x) => x.title).join(" / ")}`);
+  if (decision !== "unsupported" && (!sections.length || !quotes.length)) return fail(`${decision} 판단에는 근거 소제목과 원문 인용이 1개 이상 필요합니다`);
+  const notFound = quotes.filter((q) => !cited.some((x) => normalize(x.text).includes(normalize(q))));
+  if (notFound.length) return fail(`인용한 문장이 근거 소제목 안에 없습니다 (원문 그대로 옮기세요): ${notFound.join(" / ")}`);
   if (decision === "custom" && !customScope?.trim()) return fail("custom 판단에는 customScope(추가 개발 범위)가 필요합니다");
   const badEvidence = (evidence ?? []).filter((id) => !lib.slides.some((x) => x.id === id));
   if (badEvidence.length) return fail(`없는 슬라이드 id: ${badEvidence.join(", ")}`);
-  s.judgments[requirementId] = { decision, featureIds, rationale, customScope: decision === "custom" ? customScope : undefined, evidence };
+  s.judgments[requirementId] = { decision, sections, quotes, rationale, customScope: decision === "custom" ? customScope : undefined, evidence };
   await save(STATE, s);
   const left = s.requirements.filter((r) => !s.judgments[r.id]).length;
   return text(`${requirementId}: ${DECISION_LABEL[decision]} 기록. 남은 요구사항 ${left}건.${left ? " next_requirement를 호출하세요." : " get_traceability로 넘어가세요."}`);
@@ -102,10 +110,10 @@ server.registerTool("get_traceability", {
   const s = await state();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("추적표");
-  ws.addRow(["요구사항 ID", "요구사항", "중요도", "판단", "근거 기능", "커스터마이징 범위", "판단 이유", "참고 제안서"]).font = { bold: true };
+  ws.addRow(["요구사항 ID", "요구사항", "중요도", "판단", "근거 소제목", "정의서 인용", "커스터마이징 범위", "판단 이유", "참고 제안서"]).font = { bold: true };
   for (const r of s.requirements) {
     const j = s.judgments[r.id];
-    ws.addRow([r.id, r.title, r.priority, j ? DECISION_LABEL[j.decision] : "미판단", j?.featureIds.join(", "), j?.customScope, j?.rationale, j?.evidence?.join(", ")]);
+    ws.addRow([r.id, r.title, r.priority, j ? DECISION_LABEL[j.decision] : "미판단", j?.sections.join(", "), j?.quotes.join("\n"), j?.customScope, j?.rationale, j?.evidence?.join(", ")]);
   }
   const out = join(WORKSPACE, "output", "요구사항추적표.xlsx");
   await (await import("node:fs/promises")).mkdir(join(WORKSPACE, "output"), { recursive: true });
@@ -180,10 +188,10 @@ server.registerPrompt("create_proposal", {
 }, () => ({
   messages: [{ role: "user", content: { type: "text", text: `proposal-mcp 도구로 제안서를 만들어 주세요. 순서를 지키고, 단계마다 무엇을 했는지 짧게 알려 주세요.
 
-1. list_sources로 폴더와 진행 상태를 확인하고 load_rfp로 요구사항을 불러온다.
+1. list_sources로 폴더와 진행 상태를 확인하고, read_standard_features로 표준 기능 정의서를 끝까지 읽은 뒤 load_rfp로 요구사항을 불러온다.
 2. next_requirement → record_judgment를 done이 될 때까지 반복한다.
-   - 요구사항 문구를 기준으로 판단한다. 표준 기능 설명이 요구사항의 일부만 충족하면 custom이다.
-   - 비고 칸의 제약(예: "포털 내부 결재만 제공", "배치 진단")을 반드시 확인한다.
+   - 요구사항 문구를 기준으로 판단한다. 정의서 내용이 요구사항의 일부만 충족하면 custom이다.
+   - 정의서에 적힌 제약(예: "결재는 포털 안에서만", "배치로만", "표준에 없습니다")을 반드시 확인하고, 그 문장을 quotes에 원문 그대로 남긴다.
    - 기존 제안서에 비슷한 구축 사례가 있으면 evidence로 남기고 customScope 작성에 참고한다.
 3. get_traceability로 추적표를 보여주고 request_approval(traceability)로 승인받는다. 수정 요청이 오면 record_judgment로 고친 뒤 다시 요청한다.
 4. 승인된 판단과 기존 제안서의 표현을 참고해 초안을 쓰고 save_draft로 저장한다.

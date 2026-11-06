@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import type { Requirement } from "./sources.ts";
 
 export type Decision = "standard" | "custom" | "unsupported";
-export type Judgment = { decision: Decision; featureIds: string[]; rationale: string; customScope?: string; evidence?: string[] };
+export type Judgment = { decision: Decision; sections: string[]; quotes: string[]; rationale: string; customScope?: string; evidence?: string[] };
 export type Approval = { hash: string; at: string; via: string; comment?: string };
 export type Target = "traceability" | "draft";
 export type State = {
@@ -33,13 +33,13 @@ export const DECISION_LABEL: Record<Decision, string> = { standard: "표준 충�
 export function traceabilityMarkdown(s: State) {
   const rows = s.requirements.map((r) => {
     const j = s.judgments[r.id];
-    return `| ${r.id} | ${r.title} | ${r.priority} | ${j ? DECISION_LABEL[j.decision] : "미판단"} | ${j?.featureIds.join(", ") ?? ""} | ${j?.customScope ?? ""} | ${j?.rationale ?? ""} |`;
+    return `| ${r.id} | ${r.title} | ${r.priority} | ${j ? DECISION_LABEL[j.decision] : "미판단"} | ${j?.sections.join(", ") ?? ""} | ${j?.customScope ?? ""} | ${j?.rationale ?? ""} |`;
   });
   const count = (d: Decision) => Object.values(s.judgments).filter((j) => j.decision === d).length;
   return [
     `요구사항 ${s.requirements.length}건 · 표준 충족 ${count("standard")} · 커스터마이징 ${count("custom")} · 제안 범위 외 ${count("unsupported")} · 미판단 ${s.requirements.length - Object.keys(s.judgments).length}`,
     "",
-    "| ID | 요구사항 | 중요도 | 판단 | 근거 기능 | 커스터마이징 범위 | 판단 이유 |",
+    "| ID | 요구사항 | 중요도 | 판단 | 근거 소제목 | 커스터마이징 범위 | 판단 이유 |",
     "|---|---|---|---|---|---|---|",
     ...rows,
   ].join("\n");
