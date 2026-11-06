@@ -106,4 +106,4 @@ src/render.ts    Markdown 초안 → PPTX
 src/approve.ts   터미널 승인 (elicitation 미지원 클라이언트용)
 ```
 
-TypeScript를 Node.js 22.18+에서 빌드 없이 실행합니다. 구현은 Claude Code와 함께 했고, 문제 정의·판단 기준·승인 구조 설계는 직접 했습니다.
+TypeScript를 Node.js 22.18+에서 빌드 없이 실행합니다. 실무에서 반복되던 제안서 작업을 바탕으로 문제와 핵심 요구(표준·커스터마이징 판단 루프, 사람 승인 구조)를 직접 정의했고, 설계와 구현은 Claude Code와 함께 진행했습니다.
