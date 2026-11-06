@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "proposal": { "command": "node", "args": ["src/server.ts"] }
+  }
+}

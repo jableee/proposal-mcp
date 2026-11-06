@@ -1,0 +1,7 @@
+{
+  "_note": "평가용 정답 (사람이 판단). standard=표준 기능으로 충족, custom=표준 기능 기반 커스터마이징, unsupported=제안 범위 외",
+  "SFR-001": "standard", "SFR-002": "standard", "SFR-003": "standard", "SFR-004": "standard",
+  "SFR-005": "custom", "SFR-006": "custom", "SFR-007": "standard", "SFR-008": "custom",
+  "SFR-009": "unsupported", "SFR-010": "standard", "SFR-011": "standard", "PER-001": "standard",
+  "AVL-001": "standard", "SFR-012": "unsupported"
+}

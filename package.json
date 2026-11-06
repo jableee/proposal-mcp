@@ -1,0 +1,30 @@
+{
+  "name": "proposal-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/check.ts",
+    "start": "node src/server.ts",
+    "approve": "node src/approve.ts",
+    "samples": "node scripts/make-samples.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "exceljs": "^4.4.0",
+    "jszip": "^3.10.2",
+    "minisearch": "^7.2.0",
+    "pptxgenjs": "^4.0.1",
+    "zod": "^4.6.7"
+  },
+  "bin": {
+    "proposal-mcp": "src/server.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}
